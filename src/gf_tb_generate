@@ -1,0 +1,207 @@
+#!/usr/bin/perl
+
+use POSIX;
+
+print 'Copyright: Gu Chenghao, Ye HanChen, Zhang Bingyi
+E-mail: 13262936203@163.com
+
+'; 
+
+print "please input the length of a,b :";
+$op_length = <STDIN>;
+chomp($op_length);
+
+print "please input the digital serial number :";
+$DIGITAL = <STDIN>;
+chomp($DIGITAL);
+
+print "How many random samples do you intend to test:";
+$NSAMPLE = <STDIN>;
+chomp($NSAMPLE);
+
+
+$ITN  = 0;
+
+if( $op_length % $DIGITAL == 0){
+	$ITN = $op_length / $DIGITAL;
+}
+else{
+	$ITN = POSIX::ceil($op_length / $DIGITAL);
+}
+
+
+open TBFILE, '>', "tb_${op_length}length_${DIGITAL}digital.v";
+
+
+$DATA_WIDTH_BIN_V = $ITN * $DIGITAL;
+
+open GDEFINE, '<' ,'g_define.txt';
+
+$gwho = <GDEFINE>;
+chomp($gwho);
+
+@g = split('', $gwho);
+@g = reverse(@g);
+
+print TBFILE
+"
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company:  Fudan University
+// Engineer: Gu Chenghao, Ye HanChen, Zhang Bingyi
+// 
+// Create Date: 11/17/2017 08:42:11 AM
+// Design Name: 
+// Module Name: simulate_${op_length}length_${DIGITAL}digital
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
+
+module simulate_${op_length}length_${DIGITAL}digital;
+
+
+parameter DATA_WIDTH = ${op_length};
+parameter DIGITAL = ${DIGITAL};
+parameter ITN = ${ITN};
+parameter DATA_WIDTH_BIN = ${DATA_WIDTH_BIN_V};
+
+reg rst;
+reg clk;
+reg start;
+reg [DATA_WIDTH - 1 : 0] a;
+reg [DATA_WIDTH - 1 : 0] g;
+reg [DIGITAL - 1:0] b;
+	
+wire [DATA_WIDTH - 1 : 0] t_i_j;
+wire done;
+
+gf2m inst_gf2m
+(
+	.rst(rst),
+	.clk(clk),
+	.start(start),
+	.a(a),
+	.g(g),
+	.b(b),
+	
+	.t_i_j(t_i_j),
+	.done(done)
+);
+
+
+reg [DATA_WIDTH_BIN - 1 : 0] b_total;
+reg [DATA_WIDTH - 1 : 0] t_expected;
+
+always
+begin
+    clk = 1'b0;
+    #10;
+    clk = 1'b1;
+    #10;
+end
+
+initial begin
+// initial state
+a = ${op_length}'d0;
+g = ${op_length}'b${gwho};
+b_total = ${DATA_WIDTH_BIN_V}'d0;
+t_expected = ${op_length}'d0;
+rst = 1'b0;
+start = 1'b0;
+#100;
+rst = 1'b1;
+#100;
+
+";
+
+$ii = 0;
+
+for($ii = 0; $ii < $NSAMPLE; $ii = $ii + 1){
+	$j = 0;
+	srand($ii);
+	for($j = 0; $j < $op_length; $j = $j + 1 ){
+		$a[$j] = int(rand(1.99));
+		$b[$j] = int(rand(1.99));
+	}
+	for($j = $op_length; $j < $DATA_WIDTH_BIN_V;$j = $j + 1){
+		$b[$j] = 0;
+	}
+	$row = 0;
+	$column = 0;
+	for($row = 0; $row < $op_length + 1; $row = $row + 1){
+		for($column = 0; $column < $op_length + 1; $column = $column + 1){
+			$t[$row][$column] = 0;
+		}		
+	}
+
+	$i = 0;
+	$j = 0;
+	for($i = 1; $i < $op_length + 1; $i = $i + 1){
+		for($j = $op_length; $j >0; $j = $j - 1){
+			$t[$i][$j] = ($t[$i - 1][$op_length] & $g[$j - 1])^($b[$op_length - $i] & $a[$j - 1])^($t[$i - 1][$j - 1]);
+		}
+	}
+
+	print TBFILE "start = 1'b1;\n";
+	print TBFILE "a = ${op_length}'b";
+	for($j = $op_length - 1; $j >= 0;$j = $j - 1){
+		print TBFILE $a[$j];		
+	}
+	print TBFILE ";\n";
+	print TBFILE "g = ${op_length}'b"; 
+	for($j = $op_length - 1; $j >= 0;$j = $j - 1){
+		print TBFILE $g[$j];		
+	}
+	print TBFILE ";\n";
+	print TBFILE "b_total = ${DATA_WIDTH_BIN_V}'b";
+	for($j = ${DATA_WIDTH_BIN_V} - 1 ; $j >= 0; $j = $j - 1){
+		print TBFILE $b[$j];
+	}
+	print TBFILE ";\n";
+	print TBFILE "t_expected = ${op_length}'b";
+	for($j = $op_length; $j > 0; $j = $j - 1){
+		print TBFILE $t[$op_length][$j];
+	}
+	print TBFILE ";\n";
+	print TBFILE "#20;\n";
+	print TBFILE "start = 1'b0;\n"; 
+	for($j = $ITN; $j > 0; $j = $j - 1){
+		$high = $j*$DIGITAL - 1;
+		$low = ($j - 1)*$DIGITAL;
+		print TBFILE "b = b_total[${high} : ${low}];\n";
+		print TBFILE "#20;\n";
+	}
+	print TBFILE
+"
+if (t_expected == t_i_j)
+	\$display(\"this data is right\");
+else
+    \$display(\"error, the data is not expected\");
+#20;
+";
+
+}
+
+print TBFILE
+"
+\$finish;
+end
+
+endmodule
+
+";
+
+
+
+
+
+

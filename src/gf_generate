@@ -1,0 +1,250 @@
+#!/usr/bin/perl
+print 'Copyright: Gu Chenghao, Ye HanChen, Zhang Bingyi
+E-mail: 13262936203@163.com
+
+'; 
+
+print "please input the length of a,b :";
+$op_length = <STDIN>;
+chomp($op_length);
+
+print "please input the digital serial number :";
+$DIGITAL = <STDIN>;
+chomp($DIGITAL);
+
+open BASIC, '>', "basic_element.v";
+
+print BASIC
+"
+module basc_element
+	(
+		input wire aj,
+		input wire bj,
+		input wire t_i1_j1,
+		input wire t_i1_m1,
+		input wire b_m1,
+		input wire gj,
+		output wire out_t_i1_m1,
+		output wire out_b_m1,
+		output wire out_aj,
+		output wire out_bj,
+	 	output wire t_i_j
+		);
+assign out_aj = aj;
+assign out_bj = bj;
+assign out_t_i1_m1 = t_i1_m1;
+assign out_b_m1 = b_m1;
+
+assign t_i_j = (b_m1&aj)^(t_i1_m1&gj)^t_i1_j1;
+endmodule // basc_element
+";
+
+
+open ONE_BIT, '>', "one_bit.v";
+
+print ONE_BIT
+"
+module one_bit
+#(
+	parameter DATA_WIDTH = $op_length
+)(
+	input wire b,
+	input wire [DATA_WIDTH - 1 : 0] a,
+	input wire [DATA_WIDTH - 1 : 0] g,
+	input wire t_i1_m1,
+	input wire [DATA_WIDTH - 1 : 0] t_i1_j1,
+
+	output wire [DATA_WIDTH - 1 : 0] t_i_j,
+	output wire [DATA_WIDTH - 1 : 0] out_a,
+	output wire [DATA_WIDTH - 1 : 0] out_b
+);
+
+
+generate
+	genvar i;
+	for(i = DATA_WIDTH - 1; i >= 0; i = i - 1)
+	begin: basic
+		basc_element inst(
+			.aj(a[i]),
+			.bj(b),
+			.t_i1_j1(t_i1_j1[i]),
+			.t_i1_m1(t_i1_m1),
+			.b_m1(b),
+			.gj(g[i]),
+
+			.out_t_i1_m1(),
+			.out_b_m1(),
+			.out_aj(out_a[i]),
+			.out_bj(out_b[i]),
+	 		.t_i_j(t_i_j[i])
+			);
+	end
+endgenerate
+endmodule
+";
+
+
+open SERIAL, '>', "digital_serial.v";
+
+print SERIAL
+"
+module serial
+#(
+    parameter DATA_WIDTH = $op_length,
+	parameter DIGITAL = $DIGITAL
+)(
+	input wire [DIGITAL - 1:0] b,
+	input wire [DATA_WIDTH - 1 : 0] a,
+	input wire [DATA_WIDTH - 1 : 0] g,
+	input wire [DATA_WIDTH - 1 : 0] t_i1_j1,
+
+	output wire [DATA_WIDTH - 1 : 0] t_i_j
+);
+
+generate
+	genvar j;
+	for(j = 0; j< DIGITAL + 1; j = j + 1)
+	begin : inter_wire
+		wire [DATA_WIDTH - 1 : 0] t_wire_i_j;
+	end
+endgenerate
+
+assign t_i_j = inter_wire[DIGITAL].t_wire_i_j;
+assign inter_wire[0].t_wire_i_j = t_i1_j1;
+
+generate
+	genvar i;
+	for(i = 0; i < DIGITAL; i = i + 1)
+	begin: array
+		one_bit
+		#(
+		  .DATA_WIDTH(DATA_WIDTH)
+		) instone_bit(
+			.b(b[DIGITAL - i - 1]),
+			.a(a),
+			.g(g),
+			.t_i1_m1(inter_wire[i].t_wire_i_j[DATA_WIDTH - 1]),
+			.t_i1_j1({inter_wire[i].t_wire_i_j[DATA_WIDTH - 2:0], 1'b0}),
+
+			.t_i_j(inter_wire[i + 1].t_wire_i_j)
+			);
+	end
+endgenerate
+endmodule // serial
+";
+
+
+open TOP, '>', "${DIGITAL}bit_digital_serial.v";
+
+print TOP
+"
+module gf2m
+#(
+	parameter DIGITAL = $DIGITAL,
+	parameter DATA_WIDTH = $op_length
+)(
+	input wire rst,
+	input wire clk,
+	input wire start,
+	input wire [DATA_WIDTH - 1 : 0] a,
+	input wire [DATA_WIDTH - 1 : 0] g,
+	input wire [DIGITAL - 1:0] b,
+	output reg [DATA_WIDTH - 1 : 0] t_i_j,
+	output reg done
+);
+
+parameter ITERATION_NUMBER = DATA_WIDTH / DIGITAL;
+
+parameter IDLE = 1'b0;
+parameter CAL  = 1'b1;
+
+reg state;
+reg [12:0] counter;
+
+wire [DATA_WIDTH - 1 : 0] wire_t_i_j;
+
+serial serial_8_bit(
+	.b(b),
+	.a(a),
+	.g(g),
+	.t_i1_j1(t_i_j),
+
+	.t_i_j(wire_t_i_j)
+);
+
+
+
+always @(posedge clk or negedge rst) begin : proc_counter
+	if(~rst) begin
+		counter <= 0;
+	end else begin
+		case (state)
+			IDLE: begin  
+				counter <= 6'd0;
+			end
+			CAL: begin 
+				if( counter < ITERATION_NUMBER) 
+					counter <= counter + 1;
+				else 
+					counter <= 6'd0;
+			end
+		
+			default : /* default */;
+		endcase
+	end
+end
+
+
+always @(posedge clk or negedge rst) begin : proc_t_i_j
+	if(~rst) begin
+		t_i_j <= 0;
+	end else begin
+		case (state)
+			IDLE : t_i_j <= 0;
+			CAL : t_i_j <= wire_t_i_j;
+			default : t_i_j <= 0;
+		endcase
+	end
+end
+
+always @(posedge clk or negedge rst) begin : proc_done
+	if(~rst) begin
+		done <= 0;
+	end else begin
+		case (state)
+			IDLE : done <= 0;
+			CAL : begin 
+				if( counter < ITERATION_NUMBER) 
+					done <= 0;
+				else 
+					done <= 1'b1;
+			end	
+			default : done <= 0;
+		endcase
+	end
+end
+
+always @(posedge clk or negedge rst) begin : proc_state
+	if(~rst) begin
+		state <= IDLE;
+	end else begin
+		case (state)
+			IDLE: begin : IDLE_STATE
+				if (start)
+					state <= CAL;
+				else
+					state <= state;
+			end
+			CAL: begin  : CAL_STATE
+				if ( counter < ITERATION_NUMBER)
+					state <= CAL;
+				else
+					state <= IDLE;
+			end
+			default : state <= IDLE;
+		endcase
+	end
+end
+
+endmodule
+";
